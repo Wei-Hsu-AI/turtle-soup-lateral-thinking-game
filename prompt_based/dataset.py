@@ -2,20 +2,18 @@ import json
 from transformers import BertTokenizerFast
 from torch.utils.data import Dataset
 from pathlib import Path
+import torch
 
 class TurtleBenchDataset(Dataset):
-    def __init__(self, data_path, prompt_path, template, max_length=512):
+    def __init__(self, data_path, prompt_path, max_length=512):
         """
         初始化 Dataset
         :param data_path: JSON 檔案路徑
         :param prompt_path: Prompt 檔案路徑
-        :param template: 包含 [MASK] 的模板句子
         :param max_length: 最大序列長度
         """
-        # toikenizer 
         self.data_path = Path(data_path)
         self.prompt_path = Path(prompt_path)
-        self.template = template
         self.tokenizer = BertTokenizerFast.from_pretrained("bert-base-chinese")
         self.max_length = max_length
 
@@ -48,21 +46,30 @@ class TurtleBenchDataset(Dataset):
             surface = entry["surface"]  # 湯面部分
             bottom = entry["bottom"]    # 湯底部分
             user_guess = entry["user_guess"]  # 玩家猜測
-            label = entry["label"]      # 正確標籤
 
-            prompt_filled = ""
+            label_map = {
+                "T": "對",
+                "F": "錯",
+                "N": "不知道"
+            }
+            label = label_map[entry["label"]]  # 將 label 映射為中文
+
+            # 動態生成模板（根據 label 的 token 長度）
+            template = f"根據判定規則，此玩家的猜測為{''.join(['[MASK]'] * len(label))}。"
+
             data_length = len(surface) + len(bottom) + len(user_guess)
+            prompt_filled = ""
         
             # 判斷能否使用 long_prompt
-            if data_length + long_prompt["length"] + len(self.template) <= self.max_length:
+            if data_length + long_prompt["length"] + len(template) <= self.max_length:
                 prompt_filled = long_prompt["prompt"].format(surface=surface, bottom=bottom)
 
             # 判斷能否使用 medium_prompt
-            elif data_length + medium_prompt["length"] + len(self.template) <= self.max_length:
+            elif data_length + medium_prompt["length"] + len(template) <= self.max_length:
                 prompt_filled = medium_prompt["prompt"].format(surface=surface, bottom=bottom)
 
             # 判斷能否使用 short_prompt
-            elif data_length + short_prompt["length"] + len(self.template) <= self.max_length:
+            elif data_length + short_prompt["length"] + len(template) <= self.max_length:
                 prompt_filled = short_prompt["prompt"].format(surface=surface, bottom=bottom)
 
             else:
@@ -70,7 +77,7 @@ class TurtleBenchDataset(Dataset):
                 continue
 
             # 合成最終的輸入文本，包含填充後 Prompt、玩家猜測和模板
-            input_text = prompt_filled + user_guess + '[SEP]' + self.template
+            input_text = prompt_filled + user_guess + '[SEP]' + template
             processed_data.append({"input_text": input_text, "label": label})
 
         return processed_data
@@ -95,17 +102,28 @@ class TurtleBenchDataset(Dataset):
         )
 
         # 將 label 轉換為詞彙 ID
-        label_id = self.tokenizer(
+        label_tokens = self.tokenizer(
             label,
             padding="max_length",
             truncation=True,
-            max_length=1,
-            return_tensors="pt"
+            max_length=5,
+            return_tensors="pt",
+            add_special_tokens=False
         )["input_ids"].squeeze(0)  # 取出 ID 並壓縮維度
+
+        labels = torch.full(inputs["input_ids"].shape, -100)
+
+        # 獲取 [MASK] 的位置
+        mask_indices = (inputs["input_ids"] == self.tokenizer.mask_token_id).nonzero(as_tuple=True)[1]
+
+        # 填充 [MASK] 的位置
+        for i, mask_idx in enumerate(mask_indices):
+            labels[0, mask_idx] = label_tokens[i]
 
         # 輸出包含 input_ids, attention_mask 和 label_id
         return {
             "input_ids": inputs["input_ids"].squeeze(0),
             "attention_mask": inputs["attention_mask"].squeeze(0),
-            "labels": label_id
+            "labels": labels.squeeze(0)
         }
+
