@@ -47,15 +47,15 @@ class TurtleBenchDataset(Dataset):
             bottom = entry["bottom"]    # 湯底部分
             user_guess = entry["user_guess"]  # 玩家猜測
 
+            #  將 lable 都填充為一樣長度，這裡不選擇 [PAD] 是因為需要計算 loss
             label_map = {
-                "T": "對",
-                "F": "錯",
+                "T": "正確[SEP]",
+                "F": "錯誤[SEP]",
                 "N": "不知道"
             }
             label = label_map[entry["label"]]  # 將 label 映射為中文
 
-            # 動態生成模板（根據 label 的 token 長度）
-            template = f"根據判定規則，此玩家的猜測為{''.join(['[MASK]'] * len(label))}。"
+            template = f"根據判定規則，此玩家的猜測為[MASK][MASK][MASK]"
 
             data_length = len(surface) + len(bottom) + len(user_guess)
             prompt_filled = ""
@@ -106,7 +106,7 @@ class TurtleBenchDataset(Dataset):
             label,
             padding="max_length",
             truncation=True,
-            max_length=5,
+            max_length=3,
             return_tensors="pt",
             add_special_tokens=False
         )["input_ids"].squeeze(0)  # 取出 ID 並壓縮維度
