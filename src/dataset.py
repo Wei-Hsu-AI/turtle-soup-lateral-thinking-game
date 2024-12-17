@@ -1,5 +1,4 @@
 import json
-from transformers import BertTokenizerFast
 from torch.utils.data import Dataset
 from pathlib import Path
 import torch
@@ -156,4 +155,117 @@ class TurtleSoupDataset(Dataset):
             "attention_mask": inputs["attention_mask"].squeeze(0),
             "label_ids": label_ids.squeeze(0),
             "flags": flags.squeeze(0)
+        }
+
+
+class TurtleSoupClassificationDataset(Dataset):
+    def __init__(self, data_path, prompt_path, tokenizer, template, label_map, max_length=512):
+        """
+        初始化 Dataset
+        :param data_path: JSON 檔案路徑
+        :param prompt_path: Prompt 檔案路徑
+        :param template: 模板字符串
+        :param label_map: 標籤映射字典
+        :param max_length: 最大序列長度
+        """
+        self.data_path = Path(data_path)
+        self.prompt_path = Path(prompt_path)
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+        self.template = template
+        self.label_map = label_map
+
+        self.prompts = self._load_prompts()
+        self.data = self._load_data()
+
+    def _load_prompts(self):
+        """
+        載入 Prompt 檔案並 Tokenize 計算長度
+        :return: 包含 Tokenized 長度的 Prompt 字典
+        """
+        with open(self.prompt_path, "r", encoding="utf-8") as f:
+            prompts = json.load(f)
+
+        tokenized_prompts = {}
+        for key, value in prompts.items():
+            prompt_text = value["prompt"].format(surface="", bottom="")
+            tokenized_length = len(self.tokenizer.encode(prompt_text, add_special_tokens=False))
+
+            tokenized_prompts[key] = {
+                "prompt": value["prompt"],
+                "length": tokenized_length
+            }
+        return tokenized_prompts
+
+    def _load_data(self):
+        """
+        載入 JSON 檔案，選擇適合的 Prompt，並生成處理後的輸入文本與標籤。
+        """
+        with open(self.data_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        processed_data = []
+        for entry in data:
+            surface = entry["surface"]
+            bottom = entry["bottom"]
+            user_guess = entry["user_guess"]
+            label = self._map_label(entry["label"])
+
+            # 選擇適合的 prompt
+            prompt_filled = self._select_prompt(surface, bottom, user_guess)
+            if not prompt_filled:
+                continue
+
+            # 組合最終輸入文本
+            input_text = prompt_filled + " " + user_guess
+
+            # 加入處理後的數據
+            processed_data.append({"input_text": input_text, "label": label})
+
+        return processed_data
+
+    def _map_label(self, label):
+        """映射標籤為整數標籤"""
+        return self.label_map[label]
+
+    def _select_prompt(self, surface, bottom, user_guess):
+        """
+        根據數據長度選擇適合的 Prompt。
+        """
+        surface_length = len(self.tokenizer.encode(surface, add_special_tokens=False))
+        bottom_length = len(self.tokenizer.encode(bottom, add_special_tokens=False))
+        user_guess_length = len(self.tokenizer.encode(user_guess, add_special_tokens=False))
+
+        total_data_length = surface_length + bottom_length + user_guess_length
+
+        for prompt in ["long", "medium", "short"]:
+            prompt_length = self.prompts[prompt]["length"]
+            if total_data_length + prompt_length <= self.max_length - 2:  # [CLS] 和 [SEP]
+                return self.prompts[prompt]["prompt"].format(surface=surface, bottom=bottom)
+        return None
+
+    def __len__(self):
+        """返回資料長度"""
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        """處理每筆資料"""
+        item = self.data[idx]
+        input_text = item["input_text"]
+        label = torch.tensor(item["label"], dtype=torch.long)
+
+        # Tokenize 輸入文本
+        inputs = self.tokenizer(
+            input_text,
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt"
+        )
+
+        return {
+            "input_ids": inputs["input_ids"].squeeze(0),
+            "attention_mask": inputs["attention_mask"].squeeze(0),
+            "label": label
         }
