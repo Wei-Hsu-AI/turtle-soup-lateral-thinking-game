@@ -64,6 +64,7 @@ class PET:
         儲存模型參數
         """
         self.model.save_pretrained(path)
+        self.tokenizer.save_pretrained(path)
     
 
 class DiffPET(PET):
@@ -93,34 +94,10 @@ class DiffPET(PET):
         self._initialize_tokens()
         self._initialize_embeddings()
 
-    # def _initialize_tokens(self):
-    #     """
-    #     初始化模板和標籤的 token ID。
-    #     """
-    #     vocab_size = self.tokenizer.vocab_size
-    #     curr_idx = vocab_size - 1  # 從詞彙表最後開始分配新的 token 索引
-
-    #     # 處理模板中的固定文本部分
-    #     for segment in self.template.split(self.tokenizer._mask_token):
-    #         if segment.strip():  # 避免處理空白部分
-    #             token_ids = self.tokenizer.encode(segment, add_special_tokens=False)  # 將文本轉換為 token IDs
-    #             for token_id in token_ids:
-    #                 self.template_token_mapping.append((token_id, curr_idx))  # 映射原始 token ID 到新索引
-    #                 curr_idx -= 1
-
-    #     # 處理標籤映射中的文本
-    #     for label in self.labels:
-    #         label_ids = self.tokenizer.encode(label, add_special_tokens=False)[0]  # 將標籤文本轉換為 token IDs
-    #         self.label_token_mapping[label_ids] = curr_idx
-    #         curr_idx -= 1  # 更新索引
-
-    #     self.template_ids = torch.tensor([new_id for _, new_id in self.template_token_mapping], device=self.device).long()
-
     def _initialize_tokens(self):
         """
         初始化模板和標籤的 token ID。
         """
-        vocab_size = self.tokenizer.vocab_size
         curr_idx = 1  # 從詞彙表最後開始分配新的 token 索引
 
         # 處理模板中的固定文本部分
