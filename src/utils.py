@@ -27,8 +27,7 @@ def plot_training_validation_acc(train_accuracies, val_accuracies):
     plt.show()
 
 
-def save_training_results(model_name: str, train_losses: List[float], val_losses: List[float],
-                          train_accuracies: List[float], val_accuracies: List[float], save_dir: str = "results"):
+def save_training_results(model_name: str, train_losses: List[float], train_accuracies: List[float], val_losses: List[float], val_accuracies: List[float], save_dir: str = "results"):
     """
     儲存模型的訓練結果到 JSON 檔案，包括 losses 和 accuracies。
     """
@@ -36,8 +35,8 @@ def save_training_results(model_name: str, train_losses: List[float], val_losses
     file_path = os.path.join(save_dir, f"{model_name}_results.json")
     data = {
         "train_losses": train_losses,
-        "val_losses": val_losses,
         "train_accuracies": train_accuracies,
+        "val_losses": val_losses,
         "val_accuracies": val_accuracies
     }
     with open(file_path, "w", encoding="utf-8") as f:
@@ -103,6 +102,6 @@ def plot_losses_and_accuracies(all_results: Dict[str, Dict[str, List[float]]]):
     plt.title("Training and Validation Accuracies")
     plt.xlabel("Epochs")
     plt.ylabel("Accuracy")
-    plt.legend()
+    plt.legend(loc='upper left', framealpha=0.8)
     plt.grid()
     plt.show()
