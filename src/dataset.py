@@ -144,7 +144,8 @@ class TurtleSoupDataset(Dataset):
         label_ids[0, mask_idx] = label_id
 
         # 建立 frag array
-        template_ids_length = len(self.template.split(self.tokenizer._mask_token)[0])
+        template_without_mask = self.template.split(self.tokenizer._mask_token)[0]
+        template_ids_length = len(self.tokenizer(template_without_mask, add_special_tokens=False)['input_ids'])
 
         flags[0, mask_idx] = 1
         flags[0, mask_idx - template_ids_length:mask_idx] = 2
