@@ -59,6 +59,52 @@ class PET:
 
         return predicted_ids, true_ids
     
+    def _get_embeddings(self, inputs):
+        """
+        獲取文本的嵌入向量，使用 [CLS] token 的隱藏狀態作為句子嵌入。
+        """
+        if "input_ids" not in inputs or "attention_mask" not in inputs:
+            raise ValueError("Inputs must include 'input_ids' and 'attention_mask'.")
+  
+        input_ids = inputs["input_ids"].to(self.device)
+        attention_mask = inputs["attention_mask"].to(self.device)
+
+        # 模型前向傳播
+        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+        
+        # 使用最後一層隱藏狀態的 [CLS] token 表示作為句子嵌入
+        embeddings = outputs.hidden_states[-1][:, 0, :]  # (batch_size, hidden_size)
+        return embeddings
+    
+    def compute_contrastive_loss(self, contrastive_data, margin=1.0):
+        """
+        計算對比學習損失。
+
+        Args:
+            contrastive_data (list): 包含文本嵌入對與標籤的列表。
+            margin (float): 負樣本的距離邊界。
+
+        Returns:
+            Tensor: 對比損失。
+        """
+        total_loss = 0.0
+        for pair in contrastive_data:
+            # 獲取嵌入與標籤
+            emb_a = self._get_embeddings(pair["text_a_inputs"])
+            emb_b = self._get_embeddings(pair["text_b_inputs"])
+            labels = pair["contrastive_label"].to(self.device)
+
+            # 計算歐幾里得距離
+            distances = torch.nn.functional.pairwise_distance(emb_a, emb_b)
+
+            # 計算對比損失
+            loss = torch.mean(
+                labels * distances.pow(2) +
+                (1 - labels) * torch.relu(margin - distances).pow(2)
+            )
+            total_loss += loss
+        return total_loss
+    
     def save_model(self, path):
         """
         儲存模型參數

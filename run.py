@@ -1,29 +1,26 @@
 import torch
 from tqdm import tqdm
 
-def train_pet_model(pet, train_dataloader, val_dataloader, optimizer, lr_scheduler, epochs):
+
+def train_pet_model(pet, train_dataloader, val_dataloader, optimizer, lr_scheduler, epochs, λ=0.5, contrastive_margin=1.0):
     """
     通用的 PET 訓練與驗證方法。
 
-    功能：
-    - 執行模型的訓練迴圈，包括前向傳播、反向傳播以及參數更新。
-    - 提供訓練與驗證的準確率與損失記錄。
+    Args:
+        pet: PET 或 DiffPET 模型實例。
+        train_dataloader: 訓練數據加載器。
+        val_dataloader: 驗證數據加載器。
+        optimizer: 用於參數更新的優化器。
+        lr_scheduler: 學習率調度器。
+        epochs: 總訓練輪數。
+        λ (float): 控制分類損失與對比損失的權重比例。
+        contrastive_margin (float): 對比學習中負樣本的距離邊界。
 
-    參數：
-    - pet: PET 或 DiffPET 模型實例。
-    - train_dataloader: 訓練數據加載器。
-    - val_dataloader: 驗證數據加載器。
-    - optimizer: 用於參數更新的優化器。
-    - lr_scheduler: 學習率調度器。
-    - epochs: 總訓練輪數。
-    - tokenizer: 用於處理文本的 tokenizer。
-    - device: 設備類型 (如 GPU 或 CPU)。
-
-    返回：
-    - train_losses: 每個 epoch 的訓練損失。
-    - train_accuracies: 每個 epoch 的訓練準確率。
-    - val_losses: 每個 epoch 的驗證損失。
-    - val_accuracies: 每個 epoch 的驗證準確率。
+    Returns:
+        train_losses: 每個 epoch 的訓練損失。
+        train_accuracies: 每個 epoch 的訓練準確率。
+        val_losses: 每個 epoch 的驗證損失。
+        val_accuracies: 每個 epoch 的驗證準確率。
     """
     train_losses = []
     train_accuracies = []
@@ -40,17 +37,25 @@ def train_pet_model(pet, train_dataloader, val_dataloader, optimizer, lr_schedul
         progress_bar = tqdm(train_dataloader, desc=f'Epoch {epoch + 1}/{epochs}')
         for batch in progress_bar:
             # 前向傳播
-            logits, loss = pet.forward_step(batch)
-            train_loss += loss.item()
+            logits, loss_cls = pet.forward_step(batch)
 
             # 計算準確率
             predicted_ids, true_ids = pet.get_predictions(batch, logits)
             correct_predictions += (predicted_ids == true_ids).sum().item()
             total_predictions += len(batch["input_ids"])  # Batch size
 
+            # 對比學習損失
+            contrastive_loss = 0.0
+            if batch["contrastive"]:
+                contrastive_loss = pet.compute_contrastive_loss(batch["contrastive"], contrastive_margin)
+
+            # 合併損失
+            total_loss = loss_cls + λ * contrastive_loss
+            train_loss += total_loss.item()
+
             # 反向傳播與參數更新
             optimizer.zero_grad()
-            loss.backward()
+            total_loss.backward()
             optimizer.step()
             lr_scheduler.step()
 
@@ -60,7 +65,7 @@ def train_pet_model(pet, train_dataloader, val_dataloader, optimizer, lr_schedul
         train_losses.append(train_loss)
         train_accuracies.append(train_accuracy)
 
-        # 驗證階段
+        # 驗證階段（只計算分類性能）
         pet.model.eval()
         val_loss = 0.0
         correct_predictions = 0
