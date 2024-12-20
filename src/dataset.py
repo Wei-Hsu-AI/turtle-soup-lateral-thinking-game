@@ -59,7 +59,7 @@ class TurtleSoupDataset(Dataset):
         with open(self.data_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        template_length = len(self.tokenizer.encode(self.template, add_special_tokens=False))
+        self.template_ids_length = len(self.tokenizer.encode(self.template, add_special_tokens=False))
 
         processed_data = []
         for entry in data:
@@ -69,7 +69,7 @@ class TurtleSoupDataset(Dataset):
             user_guess = entry["user_guess"]  # 玩家猜測
 
             label = self._map_label(entry["label"])
-            prompt_filled = self._select_prompt(surface, bottom, user_guess, template_length)
+            prompt_filled = self._select_prompt(surface, bottom, user_guess, self.template_ids_length)
 
             # 如果所有 Prompt 加數據的總長度都超過 max_length，跳過該數據
             if not prompt_filled:
@@ -144,11 +144,9 @@ class TurtleSoupDataset(Dataset):
         label_ids[0, mask_idx] = label_id
 
         # 建立 frag array
-        template_without_mask = self.template.split(self.tokenizer._mask_token)[0]
-        template_ids_length = len(self.tokenizer(template_without_mask, add_special_tokens=False)['input_ids'])
-
         flags[0, mask_idx] = 1
-        flags[0, mask_idx - template_ids_length:mask_idx] = 2
+        template_ids_without_mask_length = self.template_ids_length - 1
+        flags[0, mask_idx - template_ids_without_mask_length:mask_idx] = 2
 
         # 輸出包含 input_ids, attention_mask 和 label_id
         return {
