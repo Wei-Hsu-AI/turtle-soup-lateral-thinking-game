@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 
 class TurtleSoupDataset(Dataset):
-    def __init__(self, data_path, prompt_path, tokenizer, template, label_map, max_length=512):
+    def __init__(self, data_path, prompt_path, tokenizer, template, label_map, max_length=512, contrastive_learning=False):
         """
         初始化 Dataset
         :param data_path: JSON 檔案路徑
@@ -12,6 +12,7 @@ class TurtleSoupDataset(Dataset):
         :param template: 模板字符串
         :param label_map: 標籤映射字典
         :param max_length: 最大序列長度
+        :param contrastive_learning: 是否要進行對比學習
         """
         self.data_path = Path(data_path)
         self.prompt_path = Path(prompt_path)
@@ -22,7 +23,7 @@ class TurtleSoupDataset(Dataset):
         self.label_map = label_map
 
         self.prompts = self._load_prompts()
-        self.data = self._load_data()
+        self.data = self._load_data(contrastive_learning)
 
 
     def _load_prompts(self):
@@ -43,18 +44,24 @@ class TurtleSoupDataset(Dataset):
                 "prompt": value["prompt"],
                 "length": tokenized_length
             }
-
         return tokenized_prompts
 
-    def _load_data(self):
+    def _load_data(self, contrastive_learning):
         """
-        載入 JSON 檔案，根據輸入數據的長度動態選擇適合的 Prompt，
-        並生成包含填充後 Prompt 和模板的處理後數據。
+        載入 JSON 檔案，根據數據的長度動態選擇適合的 Prompt，
+        並生成處理後的輸入文本與標籤數據，根據需要生成對比學習樣本。
 
+        Args:
+            contrastive_learning (bool): 是否啟用對比學習樣本生成。
+        
         Returns:
-            List[dict]: 處理後的數據列表，每筆資料包含 `input_text` 和 `label`。
+            List[dict]: 處理後的數據列表，每筆數據包含：
+                - `mlm`:
+                    - `input_text` (str): 經過填充的最終輸入文本。
+                    - `label` (int): 詞彙 ID 標籤。
+                - `contrastive` (List[dict] or None): 
+                    如果啟用對比學習，則為生成的樣本對，否則為 None。
         """
-
         # 載入數據檔案 (包含 surface, bottom, user_guess, label)
         with open(self.data_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -68,11 +75,15 @@ class TurtleSoupDataset(Dataset):
             bottom = entry["bottom"]    # 湯底部分
             user_guess = entry["user_guess"]  # 玩家猜測
 
+            # 將標籤映射為可用的標籤名稱
             label = self._map_label(entry["label"])
+
+            # 根據模板選擇適合的 Prompt
             prompt_filled = self._select_prompt(surface, bottom, user_guess, self.template_ids_length)
 
-            # 如果所有 Prompt 加數據的總長度都超過 max_length，跳過該數據
+            # 如果 Prompt 與數據總長度超過限制，跳過該數據
             if not prompt_filled:
+                print(f"Skipped entry due to length: {entry}")
                 continue
 
             # 合成最終的輸入文本，包含填充後 Prompt、玩家猜測和模板
@@ -84,9 +95,53 @@ class TurtleSoupDataset(Dataset):
                 add_special_tokens=False
             )[0]
 
-            processed_data.append({"input_text": input_text, "label_id": label_id})
+            contrastive_pair = None
+            if contrastive_learning:
+                # 生成對比學習樣本對
+                contrastive_pair = self._generate_contrastive_pairs(surface, bottom, user_guess, entry["label"])
+
+            # 加入處理後的數據
+            processed_data.append({
+                "mlm": {"input_text": input_text, "label_id": label_id},
+                "contrastive": contrastive_pair,
+            })
 
         return processed_data
+    
+    def _generate_contrastive_pairs(self, surface, bottom, user_guess, label):
+        """
+        根據標籤生成對比學習樣本對。
+        
+        Args:
+            surface (str): 湯面的文本。
+            bottom (str): 湯底的文本。
+            user_guess (str): 玩家猜測文本。
+            label (str): 標籤，可能為 'T', 'F', 'N'。
+        
+        Returns:
+            List[dict]: 對比學習樣本對的列表。
+        """
+        contrastive_pair = []
+
+        if label == 'T':
+            # 正樣本對
+            contrastive_pair.extend([
+                {"text_a": surface, "text_b": user_guess, "label": 1},
+                {"text_a": bottom, "text_b": user_guess, "label": 1},
+            ])
+        elif label == 'F':
+            # 負樣本對，重複兩次
+            negative_sample = {"text_a": bottom, "text_b": user_guess, "label": 0}
+            contrastive_pair.extend([negative_sample] * 2)
+        elif label == 'N':
+            # 負樣本對
+            contrastive_pair.extend([
+                {"text_a": surface, "text_b": user_guess, "label": 0},
+                {"text_a": bottom, "text_b": user_guess, "label": 0},
+            ])
+
+        return contrastive_pair
+
     
     def _map_label(self, label):
         """映射標籤為對應的中文描述"""
@@ -111,6 +166,7 @@ class TurtleSoupDataset(Dataset):
             prompt_length = self.prompts[prompt]["length"]
             if total_data_length  + prompt_length + template_length <= self.max_length - 2:  # 加上頭尾的[CLS]、[SEP]
                 return self.prompts[prompt]["prompt"].format(surface=surface, bottom=bottom) + user_guess
+            
         return None
 
     def _get_mask_index(self, input_ids):
@@ -122,10 +178,21 @@ class TurtleSoupDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        """處理每筆資料"""
+        """
+        處理每筆資料，生成適合模型的輸入格式。
+
+        Args:
+            idx (int): 資料的索引。
+
+        Returns:
+            dict: 包含處理後的 MLM 和對比學習數據。
+        """
         item = self.data[idx]
-        input_text = item["input_text"]
-        label_id = torch.tensor(item["label_id"], dtype=torch.long) 
+
+        # 處理 MLM 資料
+        mlm_data = item['mlm']
+        input_text = mlm_data["input_text"]
+        label_id = torch.tensor(mlm_data["label_id"], dtype=torch.long) 
 
         # Tokenize 輸入和標籤
         inputs = self.tokenizer(
@@ -139,21 +206,63 @@ class TurtleSoupDataset(Dataset):
         label_ids = torch.full(inputs["input_ids"].shape, -100)
         flags = torch.full(inputs["input_ids"].shape, 0)  # 1: [MASK], 2: template, 0: 其他
 
+        # 找到 [MASK] 的索引並標記
         mask_idx = self._get_mask_index(inputs["input_ids"])
+        if mask_idx is None:
+            raise(f"Warning: [MASK] not found in input_text: {input_text}")
+
         # 填充 [MASK] 的位置
         label_ids[0, mask_idx] = label_id
-
-        # 建立 frag array
-        flags[0, mask_idx] = 1
+        # 建立 flags array
         template_ids_without_mask_length = self.template_ids_length - 1
+        flags[0, mask_idx] = 1
         flags[0, mask_idx - template_ids_without_mask_length:mask_idx] = 2
 
-        # 輸出包含 input_ids, attention_mask 和 label_id
+        # 處理對比學習資料
+        contrastive_data = item['contrastive']
+        contrastive_pairs = []
+        if contrastive_data:
+            for pair in contrastive_data:
+                text_a = pair["text_a"]
+                text_b = pair["text_b"]
+                contrastive_label = torch.tensor(pair["label"], dtype=torch.float)
+
+                # Tokenize text_a 和 text_b
+                text_a_inputs = self.tokenizer(
+                    text_a,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=self.max_length,
+                    return_tensors="pt"
+                )
+                text_b_inputs = self.tokenizer(
+                    text_b,
+                    padding="max_length",
+                    truncation=True,
+                    max_length=self.max_length,
+                    return_tensors="pt"
+                )
+
+                contrastive_pairs.append({
+                    "text_a_inputs": {
+                        "input_ids": text_a_inputs["input_ids"].squeeze(0),
+                        "attention_mask": text_a_inputs["attention_mask"].squeeze(0),
+                    },
+                    "text_b_inputs": {
+                        "input_ids": text_b_inputs["input_ids"].squeeze(0),
+                        "attention_mask": text_b_inputs["attention_mask"].squeeze(0),
+                    },
+                    "contrastive_label": contrastive_label
+                })
+
+
+        # 返回處理後的數據
         return {
             "input_ids": inputs["input_ids"].squeeze(0),
             "attention_mask": inputs["attention_mask"].squeeze(0),
             "label_ids": label_ids.squeeze(0),
-            "flags": flags.squeeze(0)
+            "flags": flags.squeeze(0),
+            "contrastive": contrastive_pairs
         }
 
 
