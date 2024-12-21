@@ -192,3 +192,62 @@ def train_classification_model(model, train_dataloader, val_dataloader, optimize
               f"train_acc: {train_accuracy:.3f}, val_acc: {val_accuracy:.3f}")
 
     return train_losses, train_accuracies, val_losses, val_accuracies
+
+
+
+def train_contrastive_model(trainer, train_dataloader, val_dataloader, optimizer, lr_scheduler, epochs, margin=1.0):
+    """
+    對比學習的訓練函數，包含訓練和驗證。
+
+    Args:
+        trainer: 專門用於對比學習的模型（如 ContrastiveTrainer）。
+        train_dataloader: 訓練數據加載器。
+        val_dataloader: 驗證數據加載器。
+        optimizer: 用於參數更新的優化器。
+        lr_scheduler: 學習率調度器。
+        epochs: 總訓練輪數。
+        margin (float): 負樣本的距離邊界。
+
+    Returns:
+        train_losses: 每個 epoch 的平均訓練損失。
+        val_losses: 每個 epoch 的平均驗證損失。
+    """
+    train_losses = []
+    val_losses = []
+
+    for epoch in range(epochs):
+        trainer.model.train()
+        train_loss = 0.0
+
+        progress_bar = tqdm(train_dataloader, desc=f'Epoch {epoch + 1}/{epochs}')
+        for batch in progress_bar:
+            # 計算對比學習損失
+            loss = trainer.compute_contrastive_loss(batch, margin)
+            train_loss += loss.item()
+
+            # 反向傳播與參數更新
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            lr_scheduler.step()
+
+        # 計算平均損失
+        train_loss /= len(train_dataloader)
+        train_losses.append(train_loss)
+
+        # 驗證階段
+        trainer.model.eval()
+        val_loss = 0.0
+
+        with torch.no_grad():
+            for batch in val_dataloader:
+                loss = trainer.compute_contrastive_loss(batch, margin)
+                val_loss += loss.item()
+
+        # 計算平均驗證損失
+        val_loss /= len(val_dataloader)
+        val_losses.append(val_loss)
+
+        print(f"Epoch {epoch + 1}/{epochs} - Train Loss: {train_loss:.3f}, Val Loss: {val_loss:.3f}")
+
+    return train_losses, val_losses
