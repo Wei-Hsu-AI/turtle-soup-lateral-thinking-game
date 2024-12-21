@@ -1,31 +1,107 @@
 import torch
+from typing import List, Dict, Any
 
 """
 此實現參考自 DART 的 GitHub 專案 (https://github.com/zjunlp/DART/tree/main)。
 它提供了基於 PET 和 DiffPET 的訓練框架，支持可微分的 tokens 和 prompts。
 """
 
-class PET:
+class Trainer:
     """
-    PET (Pattern-Exploiting Training) 基礎類別，用於基於模板和標籤的分類模型。
-
-    功能：
-    - 支持模型的前向傳播和損失計算。
-    - 提供預測方法來生成模型輸出。
-
-    屬性：
-    - model: 用於訓練的 Transformer 模型。
-    - tokenizer: 用於編碼的 tokenizer。
-    - device: 設備類型 (如 GPU 或 CPU)。
+    通用訓練基礎類別，提供基本功能：
+    - 模型保存
+    - 嵌入提取
     """
     def __init__(self, model, tokenizer, device):
+        """
+        初始化 Trainer。
+
+        Args:
+            model: Transformer 模型實例，用於嵌入提取。
+            tokenizer: 用於編碼的 tokenizer。
+            device: 設備類型 (如 GPU 或 CPU)。
+        """
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
 
+    def save_model(self, path: str):
+        """
+        儲存模型參數。
+
+        Args:
+            path (str): 儲存模型的目錄。
+        """
+        self.model.save_pretrained(path)
+        self.tokenizer.save_pretrained(path)
+
+class ContrastiveTrainer(Trainer):
+    """
+    專門處理對比學習的訓練類別。
+    """
+    def _get_embeddings(self, inputs: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        獲取文本的嵌入向量，使用 [CLS] token 的隱藏狀態作為句子嵌入。
+
+        Args:
+            inputs (dict): 包含 `input_ids` 和 `attention_mask` 的字典。
+
+        Returns:
+            Tensor: [CLS] token 的嵌入向量，形狀為 (batch_size, hidden_size)。
+        """
+        if "input_ids" not in inputs or "attention_mask" not in inputs:
+            raise ValueError("Inputs must include 'input_ids' and 'attention_mask'.")
+
+        input_ids = inputs["input_ids"].to(self.device)
+        attention_mask = inputs["attention_mask"].to(self.device)
+
+        # 模型前向傳播
+        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+
+        # 使用最後一層隱藏狀態的 [CLS] token 表示作為句子嵌入
+        embeddings = outputs.hidden_states[-1][:, 0, :]  # (batch_size, hidden_size)
+        return embeddings
+
+    def compute_contrastive_loss(self, contrastive_data, margin: float = 1.0) -> torch.Tensor:
+        """
+        計算對比學習損失。
+
+        Args:
+            contrastive_data (dict): 包含文本嵌入對與標籤的字典。
+            margin (float): 負樣本的距離邊界。
+            
+        Returns:
+            Tensor: 對比損失。
+        """
+        emb_a = self._get_embeddings(contrastive_data["text_a_inputs"])
+        emb_b = self._get_embeddings(contrastive_data["text_b_inputs"])
+        labels = contrastive_data["contrastive_label"].to(self.device)
+
+        # 計算歐幾里得距離
+        distances = torch.nn.functional.pairwise_distance(emb_a, emb_b)
+
+        # 計算對比損失
+        loss = torch.mean(
+            labels * distances.pow(2) +
+            (1 - labels) * torch.relu(margin - distances).pow(2)
+        )
+
+        return loss
+
+
+class PET(ContrastiveTrainer):
+    """
+    PET (Pattern-Exploiting Training) 基礎類別，用於基於模板和標籤的分類模型。
+    """
     def forward_step(self, batch):
         """
         前向傳播計算 logits 和損失。
+
+        Args:
+            batch (dict): 包含 `input_ids`, `attention_mask`, 和 `label_ids` 的字典。
+
+        Returns:
+            Tuple[Tensor, Tensor]: logits 和損失。
         """
         input_ids = batch["input_ids"].to(self.device)
         attention_mask = batch["attention_mask"].to(self.device)
@@ -59,75 +135,39 @@ class PET:
 
         return predicted_ids, true_ids
     
-    def _get_embeddings(self, inputs):
+    def compute_contrastive_loss(self, contrastive_data_list: List, margin: float = 1.0) -> torch.Tensor:
         """
-        獲取文本的嵌入向量，使用 [CLS] token 的隱藏狀態作為句子嵌入。
-        """
-        if "input_ids" not in inputs or "attention_mask" not in inputs:
-            raise ValueError("Inputs must include 'input_ids' and 'attention_mask'.")
-  
-        input_ids = inputs["input_ids"].to(self.device)
-        attention_mask = inputs["attention_mask"].to(self.device)
-
-        # 模型前向傳播
-        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
-        
-        # 使用最後一層隱藏狀態的 [CLS] token 表示作為句子嵌入
-        embeddings = outputs.hidden_states[-1][:, 0, :]  # (batch_size, hidden_size)
-        return embeddings
-    
-    def compute_contrastive_loss(self, contrastive_data, margin=1.0):
-        """
-        計算對比學習損失。
+        計算一個 list 的對比學習損失（覆寫父類方法）。
 
         Args:
-            contrastive_data (list): 包含文本嵌入對與標籤的列表。
+            contrastive_data_list (list): 包含多個文本嵌入對與標籤的列表。
             margin (float): 負樣本的距離邊界。
 
         Returns:
             Tensor: 對比損失。
         """
         total_loss = 0.0
-        for pair in contrastive_data:
-            # 獲取嵌入與標籤
-            emb_a = self._get_embeddings(pair["text_a_inputs"])
-            emb_b = self._get_embeddings(pair["text_b_inputs"])
-            labels = pair["contrastive_label"].to(self.device)
-
-            # 計算歐幾里得距離
-            distances = torch.nn.functional.pairwise_distance(emb_a, emb_b)
-
-            # 計算對比損失
-            loss = torch.mean(
-                labels * distances.pow(2) +
-                (1 - labels) * torch.relu(margin - distances).pow(2)
-            )
+        for contrastive_data in contrastive_data_list:
+            loss = super().compute_contrastive_loss(contrastive_data, margin)
             total_loss += loss
+
         return total_loss
-    
-    def save_model(self, path):
-        """
-        儲存模型參數
-        """
-        self.model.save_pretrained(path)
-        self.tokenizer.save_pretrained(path)
+
     
 
 class DiffPET(PET):
     """
     DiffPET (Differentiable Prompt-based PET) 擴展類別。
-
-    功能：
     - 支持可微分模板和標籤的初始化和替換。
     - 允許模型學習模板和標籤的嵌入表示。
 
-    屬性：
-    - template: 用於生成輸入的模板字符串。
-    - label: 標籤的文本表示。
-    - template_token_mapping: 模板中 token 與新索引的對應關係。
-    - label_token_mapping: 標籤中 token 與新索引的對應關係。
+    Args:
+        template: 用於生成輸入的模板字符串。
+        label: 標籤的文本表示。
+        template_token_mapping: 模板中 token 與新索引的對應關係。
+        label_token_mapping: 標籤中 token 與新索引的對應關係。
     """
-    def __init__(self, model, tokenizer, template, labels, device):
+    def __init__(self, model, tokenizer, template: str, labels: List, device):
         super().__init__(model, tokenizer, device)
         self.template = template
         self.labels = labels
@@ -147,7 +187,7 @@ class DiffPET(PET):
         curr_idx = 1  # 從詞彙表最後開始分配新的 token 索引
 
         # 處理模板中的固定文本部分
-        for segment in self.template.split(self.tokenizer._mask_token):
+        for segment in self.template.split('[MASK]'):
             if segment.strip():  # 避免處理空白部分
                 token_ids = self.tokenizer.encode(segment, add_special_tokens=False)  # 將文本轉換為 token IDs
                 for token_id in token_ids:
@@ -210,30 +250,3 @@ class DiffPET(PET):
         """
         self._prepare_input(batch)
         return super().forward_step(batch)
-    
-    def decode_output(self, output_ids):
-        reverse_label_token_mapping = {v: k for k, v in self.label_token_mapping.items()}
-
-        """
-        將模型輸出的新 token 轉換回原始 token。
-        """
-        decoded_tokens = []
-        for token_id in output_ids:
-            if token_id in reverse_label_token_mapping:
-                # 標籤 token
-                decoded_tokens.append(reverse_label_token_mapping[token_id])
-            else:
-                # 其他 token
-                decoded_tokens.append(self.tokenizer.decode([token_id]))
-        return decoded_tokens
-    
-    def batch_decode_output(self, batch_output_ids):
-        """
-        將批量輸出的新 token 轉換回原始 token。
-        """
-        decoded_batches = []
-        for output_ids in batch_output_ids:
-            decoded_batches.append(self.decode_output(output_ids.tolist()))
-        return decoded_batches
-
-
