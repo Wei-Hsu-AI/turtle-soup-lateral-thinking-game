@@ -1,11 +1,11 @@
-{
-    "short": {
-        "prompt": "You are the referee of the game. Based on <surface> and <bottom>, judge whether the player's guess is correct. Your answer can only be one of the following three: 1. Correct 2. Incorrect 3. Unknown <Surface>{surface} <Bottom>{bottom} Please judge the following player's guess:"
+[
+    {
+        "text": "You are the referee of the game. Based on <surface> and <bottom>, judge whether the player's guess is correct. Your answer can only be one of the following three: 1. Correct 2. Incorrect 3. Unknown <Surface>{surface} <Bottom>{bottom} Please judge the following player's guess:{user_guess}"
     },
-    "medium": {
-        "prompt": "You are the referee of the game. Based on <surface> and <bottom>, judge whether the player's guess is correct. Your answer can only be one of the following three: 1. Correct: The player's guess matches the story. 2. Incorrect: The player's guess does not match the story. 3. Unknown: It is impossible to infer a conclusion based on <surface> and <bottom>. Note: 1. Players can only see <surface>, and your judgment must also be based solely on <surface>. 2. If the guess cannot be inferred from the story, respond with 'Unknown'. <Surface>{surface} <Bottom>{bottom} Please judge the following player's guess:"
+    {
+        "text": "You are the referee of the game. Based on <surface> and <bottom>, judge whether the player's guess is correct. Your answer can only be one of the following three: 1. Correct: The player's guess matches the story. 2. Incorrect: The player's guess does not match the story. 3. Unknown: It is impossible to infer a conclusion based on <surface> and <bottom>. Note: 1. Players can only see <surface>, and your judgment must also be based solely on <surface>. 2. If the guess cannot be inferred from the story, respond with 'Unknown'. <Surface>{surface} <Bottom>{bottom} Please judge the following player's guess:{user_guess}"
     },
-    "long": {
-        "prompt": "You are the referee of the game. Based on the provided <surface> and <bottom>, understand the story. The player makes a guess based on <surface>, and you are asked to judge whether the guess is correct. You can only respond with one of the three answers: Correct, Incorrect, Unknown. Judgment rules: 1. If the player's guess is correct, respond 'Correct'. 2. If the player's guess is incorrect, respond 'Incorrect'. 3. If it is impossible to draw a conclusion from <surface> and <bottom> or the story cannot be inferred, respond 'Unknown'. Note: 1. Players can only see <surface>, so their guess is based solely on <surface>. Even if <bottom> contains other information, it does not affect the judgment. 2. If the guess cannot be inferred from the story, respond 'Unknown'. 3. Strictly adhere to answering only 'Correct', 'Incorrect', or 'Unknown'. <Surface>{surface} <Bottom>{bottom} Please judge the following player's guess:"
+    {
+        "text": "You are the referee of the game. Based on the provided <surface> and <bottom>, understand the story. The player makes a guess based on <surface>, and you are asked to judge whether the guess is correct. You can only respond with one of the three answers: Correct, Incorrect, Unknown. Judgment rules: 1. If the player's guess is correct, respond 'Correct'. 2. If the player's guess is incorrect, respond 'Incorrect'. 3. If it is impossible to draw a conclusion from <surface> and <bottom> or the story cannot be inferred, respond 'Unknown'. Note: 1. Players can only see <surface>, so their guess is based solely on <surface>. Even if <bottom> contains other information, it does not affect the judgment. 2. If the guess cannot be inferred from the story, respond 'Unknown'. 3. Strictly adhere to answering only 'Correct', 'Incorrect', or 'Unknown'. <Surface>{surface} <Bottom>{bottom} Please judge the following player's guess:{user_guess}"
     }
-}
+]

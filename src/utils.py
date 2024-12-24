@@ -1,8 +1,44 @@
 import matplotlib.pyplot as plt
 import json
 import os
-from typing import List, Dict
+from typing import Any
 import matplotlib.colors as mcolors
+import yaml
+
+class AttrDict(dict):
+    """支持屬性訪問的字典包裝器"""
+    def __init__(self, *args, **kwargs):
+        super(AttrDict, self).__init__(*args, **kwargs)
+        for key, value in self.items():
+            if isinstance(value, dict):
+                self[key] = AttrDict(value)
+
+    def __getattr__(self, item):
+        try:
+            return self[item]
+        except KeyError:
+            raise AttributeError(f"'AttrDict' object has no attribute '{item}'")
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+        
+def load_config(path, **kwargs):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        raise ValueError(f"Configuration file not found: {path}")
+    except yaml.YAMLError as e:
+        raise ValueError(f"Error parsing YAML file: {e}")
+    
+    if "learning_rate" in config and isinstance(config["learning_rate"], str):
+        config["learning_rate"] = float(config["learning_rate"])
+    if "weight_decay" in config and isinstance(config["weight_decay"], str):
+        config["weight_decay"] = float(config["weight_decay"])
+
+    config.update(kwargs)
+    return AttrDict(config)
 
 def plot_training_validation_loss(train_losses, val_losses):
     plt.figure(figsize=(8, 6))
@@ -26,8 +62,7 @@ def plot_training_validation_acc(train_accuracies, val_accuracies):
     plt.grid(True)
     plt.show()
 
-
-def save_training_results(model_name: str, train_losses: List[float], train_accuracies: List[float], val_losses: List[float], val_accuracies: List[float], save_dir: str = "results"):
+def save_training_results(model_name: str, train_losses: list[float], train_accuracies: list[float], val_losses: list[float], val_accuracies: list[float], save_dir: str = "results"):
     """
     儲存模型的訓練結果到 JSON 檔案，包括 losses 和 accuracies。
     """
@@ -43,7 +78,7 @@ def save_training_results(model_name: str, train_losses: List[float], train_accu
         json.dump(data, f, indent=4)
     print(f"Results saved to: {file_path}")
 
-def load_all_training_results(save_dir: str = "results") -> Dict[str, Dict[str, List[float]]]:
+def load_all_training_results(save_dir: str = "results") -> dict[str, dict[str, list[float]]]:
     """
     載入所有模型的訓練結果 JSON 檔案，返回統一的字典。
     """
@@ -56,7 +91,7 @@ def load_all_training_results(save_dir: str = "results") -> Dict[str, Dict[str, 
                 all_results[model_name] = json.load(f)
     return all_results
 
-def plot_losses_and_accuracies(all_results: Dict[str, Dict[str, List[float]]]):
+def plot_losses_and_accuracies(all_results: dict[str, dict[str, list[float]]]):
     """
     繪製所有模型的 losses 和 accuracies 圖表。
     - train_losses 和 val_losses 在一張圖。
