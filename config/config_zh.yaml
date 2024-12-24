@@ -1,0 +1,27 @@
+train_data_path: "./data/TurtleBench-extended-zh/train_8k.json"
+test_data_path: "./data/TurtleBench-extended-zh/test_1.5k.json"
+prompt_path: "./prompts/prompt_zh.json"
+template: "根據判定規則，此玩家的猜測為[MASK]"
+
+pretrained_model_path: "bert-base-chinese"
+batch_size: 4
+epochs: 10
+learning_rate: 1e-5
+weight_decay: 1e-4
+
+pet:
+    max_length: 512
+    enable_contrastive_learning: true
+    lambda_weight: 0.5
+    contrastive_margin: 1.0
+    label_map: { T: "是", F: "否", N: "不" }
+
+classification:
+    max_length: 512
+    label_map: { T: 0, F: 1, N: 2 }
+
+contrastive:
+    max_length: 256
+    contrastive_margin: 1.0
+
+output_dir: output\zh

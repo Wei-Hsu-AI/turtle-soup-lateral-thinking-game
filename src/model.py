@@ -73,8 +73,8 @@ class ContrastiveTrainer(Trainer):
         Returns:
             Tensor: 對比損失。
         """
-        emb_a = self._get_embeddings(contrastive_data["text_a_inputs"])
-        emb_b = self._get_embeddings(contrastive_data["text_b_inputs"])
+        emb_a = self._get_embeddings(contrastive_data["text_a_encoded"])
+        emb_b = self._get_embeddings(contrastive_data["text_b_encoded"])
         labels = contrastive_data["contrastive_label"].to(self.device)
 
         # 計算歐幾里得距離
